@@ -20,19 +20,37 @@ if (fs.existsSync('orders.json')) {
   );
 }
 
+// PRODUCT DETAILS
+const product = {
+  name: "🛒 BigBasket ₹100 OFF",
+  file: "bigbasket.txt",
+  price: 6,
+  details:
+`🛒 BigBasket Offer
+
+💰 ₹100 OFF on ₹100+
+
+🍫 Valid on Chocolate / Ice Cream Orders
+
+🆕 Valid only for users who never ordered from BigBasket before
+
+⚠ Coupon may not work on old/existing accounts`
+};
+
+// START
 bot.onText(/\/start/, (msg) => {
 
   bot.sendMessage(
     msg.chat.id,
-`🎟 Welcome to CodeBasketBot
+`${product.details}
 
-💰 Price per coupon = ₹6
+💵 Price: ₹${product.price} per code
 
-📦 Enter quantity (1-50):`,
+🛍 Choose Option Below`,
 {
   reply_markup: {
     keyboard: [
-      ["🛒 Buy Coupons", "📊 Available Stock"],
+      ["🛒 Buy Coupon", "📊 Available Stock"],
       ["📦 My Orders"],
       ["📞 Support", "👤 Owner"]
     ],
@@ -43,6 +61,7 @@ bot.onText(/\/start/, (msg) => {
 
 });
 
+// MAIN MESSAGE HANDLER
 bot.on('message', async (msg) => {
 
   const chatId = String(msg.chat.id);
@@ -69,31 +88,14 @@ bot.on('message', async (msg) => {
 
   }
 
-  // BUY BUTTON
-  if (msg.text === "🛒 Buy Coupons") {
-
-    return bot.sendMessage(
-      chatId,
-      "📦 Enter quantity (1-50):"
-    );
-
-  }
-
-  // STOCK BUTTON
+  // AVAILABLE STOCK
   if (msg.text === "📊 Available Stock") {
 
-    const file = fs.readFileSync(
-      'coupons.txt',
-      'utf-8'
-    );
-
-    const codes = file
-      .split('\n')
-      .filter(code => code.trim() !== '');
+    const stock = getStock(product.file);
 
     return bot.sendMessage(
       chatId,
-`📊 Available Coupons: ${codes.length}`
+`📊 Available Coupons: ${stock}`
     );
 
   }
@@ -118,7 +120,9 @@ bot.on('message', async (msg) => {
 
       text +=
 `#${index + 1}
+
 📦 Quantity: ${order.qty}
+
 💰 Amount: ₹${order.total}
 
 `;
@@ -129,53 +133,69 @@ bot.on('message', async (msg) => {
 
   }
 
+  // BUY BUTTON
+  if (msg.text === "🛒 Buy Coupon") {
+
+    const stock = getStock(product.file);
+
+    return bot.sendMessage(
+      chatId,
+`${product.details}
+
+💵 Price: ₹${product.price} per code
+
+📊 Stock Available: ${stock}
+
+📦 Enter quantity (1-50):`
+    );
+
+  }
+
   // QUANTITY
   const qty = parseInt(msg.text);
 
-  if (isNaN(qty) || qty < 1 || qty > 50) {
+  if (isNaN(qty)) return;
+
+  if (qty < 1 || qty > 50) {
 
     return bot.sendMessage(
       chatId,
-      "❌ Enter quantity between 1 and 50"
+      "❌ Enter quantity between 1-50"
     );
 
   }
 
-  const file = fs.readFileSync(
-    'coupons.txt',
-    'utf-8'
-  );
+  const codes = getCodes(product.file);
 
-  const availableCodes = file
-    .split('\n')
-    .filter(code => code.trim() !== '');
-
-  if (qty > availableCodes.length) {
+  if (qty > codes.length) {
 
     return bot.sendMessage(
       chatId,
-`❌ Only ${availableCodes.length} coupons available.`
+`❌ Only ${codes.length} coupons available`
     );
 
   }
 
-  const total = qty * 6;
+  const total = qty * product.price;
 
   pendingOrders[chatId] = {
     qty,
     total
   };
 
+  // PAYMENT QR
   bot.sendPhoto(
     chatId,
     './qr.jpg',
     {
       caption:
-`✅ ${qty} Coupons Selected
+`${product.name}
 
-💰 Total Amount = ₹${total}
+📦 Quantity: ${qty}
 
-Scan QR and complete payment.
+💰 Total Amount: ₹${total}
+
+📲 Scan QR and complete payment.
 
 After payment click below.`,
       reply_markup: {
@@ -193,6 +213,7 @@ After payment click below.`,
 
 });
 
+// BUTTON HANDLER
 bot.on('callback_query', async (query) => {
 
   const chatId = String(query.message.chat.id);
@@ -206,22 +227,23 @@ bot.on('callback_query', async (query) => {
 
     bot.sendMessage(
       ADMIN_ID,
-`🛒 New Payment Request
+`🛒 New Order Request
 
 👤 User ID: ${chatId}
 
 📦 Quantity: ${order.qty}
+
 💰 Amount: ₹${order.total}`,
 {
   reply_markup: {
     inline_keyboard: [
       [
         {
-          text: "✅ YES",
+          text: "✅ APPROVE",
           callback_data: `approve_${chatId}`
         },
         {
-          text: "❌ NO",
+          text: "❌ REJECT",
           callback_data: `reject_${chatId}`
         }
       ]
@@ -237,32 +259,30 @@ bot.on('callback_query', async (query) => {
 
   }
 
-  // APPROVE
+  // APPROVE PAYMENT
   if (query.data.startsWith("approve_")) {
 
     if (String(query.from.id) !== ADMIN_ID) return;
 
-    const userId = String(query.data.split("_")[1]);
+    const userId = String(
+      query.data.split("_")[1]
+    );
 
     const order = pendingOrders[userId];
 
     if (!order) return;
 
-    const file = fs.readFileSync(
-      'coupons.txt',
-      'utf-8'
+    const codes = getCodes(product.file);
+
+    const selectedCodes = codes.slice(
+      0,
+      order.qty
     );
-
-    let codes = file
-      .split('\n')
-      .filter(code => code.trim() !== '');
-
-    const selected = codes.slice(0, order.qty);
 
     const remaining = codes.slice(order.qty);
 
     fs.writeFileSync(
-      'coupons.txt',
+      product.file,
       remaining.join('\n')
     );
 
@@ -276,20 +296,19 @@ bot.on('callback_query', async (query) => {
       total: order.total
     });
 
-    // SAVE TO FILE
     fs.writeFileSync(
       'orders.json',
       JSON.stringify(userOrders, null, 2)
     );
 
     let text =
-`✅ Payment Confirmed
+`✅ Payment Approved
 
 🎟 Your Coupons:
 
 `;
 
-    selected.forEach(code => {
+    selectedCodes.forEach(code => {
       text += `${code}\n`;
     });
 
@@ -299,16 +318,18 @@ bot.on('callback_query', async (query) => {
 
   }
 
-  // REJECT
+  // REJECT PAYMENT
   if (query.data.startsWith("reject_")) {
 
     if (String(query.from.id) !== ADMIN_ID) return;
 
-    const userId = String(query.data.split("_")[1]);
+    const userId = String(
+      query.data.split("_")[1]
+    );
 
     bot.sendMessage(
       userId,
-      "❌ Payment not approved."
+      "❌ Payment Rejected"
     );
 
     delete pendingOrders[userId];
@@ -316,3 +337,24 @@ bot.on('callback_query', async (query) => {
   }
 
 });
+
+// FUNCTIONS
+
+function getCodes(file) {
+
+  if (!fs.existsSync(file)) return [];
+
+  return fs.readFileSync(
+    file,
+    'utf-8'
+  )
+  .split('\n')
+  .filter(code => code.trim() !== '');
+
+}
+
+function getStock(file) {
+
+  return getCodes(file).length;
+
+}
