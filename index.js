@@ -3,63 +3,78 @@ require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const fs = require('fs');
 
+// =======================
+// CRASH PROTECTION
+// =======================
+
+process.on('uncaughtException', console.error);
+
+process.on('unhandledRejection', console.error);
+
+// =======================
+// BOT CONFIG
+// =======================
+
 const bot = new TelegramBot(process.env.BOT_TOKEN, {
-  polling: true
+  polling: {
+    interval: 300,
+    autoStart: true,
+    params: {
+      timeout: 10
+    }
+  }
 });
 
 const ADMIN_ID = String(process.env.ADMIN_ID);
 
 const CHANNEL_USERNAME = "@codebasketofficial";
 
+// =======================
+// MEMORY CACHE
+// =======================
+
 const pendingOrders = {};
 
 // =======================
-// LOAD FILES
+// LOAD JSON FILES
 // =======================
 
-let userOrders = {};
-let referrals = {};
-let users = [];
+function loadJSON(file, defaultData) {
 
-let stats = {
-  totalOrders: 0,
-  totalRevenue: 0
-};
+  if (!fs.existsSync(file)) {
 
-if (fs.existsSync('orders.json')) {
+    fs.writeFileSync(
+      file,
+      JSON.stringify(defaultData, null, 2)
+    );
 
-  userOrders = JSON.parse(
-    fs.readFileSync('orders.json')
+    return defaultData;
+
+  }
+
+  return JSON.parse(
+    fs.readFileSync(file)
   );
 
 }
 
-if (fs.existsSync('referrals.json')) {
+let userOrders =
+  loadJSON('orders.json', {});
 
-  referrals = JSON.parse(
-    fs.readFileSync('referrals.json')
-  );
+let referrals =
+  loadJSON('referrals.json', {});
 
-}
+let users =
+  loadJSON('users.json', []);
 
-if (fs.existsSync('users.json')) {
-
-  users = JSON.parse(
-    fs.readFileSync('users.json')
-  );
-
-}
-
-if (fs.existsSync('stats.json')) {
-
-  stats = JSON.parse(
-    fs.readFileSync('stats.json')
-  );
-
-}
+let stats =
+  loadJSON('stats.json', {
+    totalOrders: 0,
+    totalRevenue: 0
+  });
 
 // =======================
-// PRODUCT DETAILS
+// PRODUCT
 // =======================
 
 const product = {
@@ -84,6 +99,70 @@ const product = {
 };
 
 // =======================
+// HELPER FUNCTIONS
+// =======================
+
+function getCodes(file) {
+
+  if (!fs.existsSync(file)) {
+
+    return [];
+
+  }
+
+  return fs.readFileSync(
+    file,
+    'utf-8'
+  )
+  .split('\n')
+  .filter(code => code.trim() !== '');
+
+}
+
+function getStock(file) {
+
+  return getCodes(file).length;
+
+}
+
+function saveJSON(file, data) {
+
+  fs.writeFileSync(
+    file,
+    JSON.stringify(data, null, 2)
+  );
+
+}
+
+// =======================
+// FORCE JOIN CHECK
+// =======================
+
+async function checkJoin(chatId) {
+
+  try {
+
+    const member =
+      await bot.getChatMember(
+        CHANNEL_USERNAME,
+        chatId
+      );
+
+    return (
+      member.status === 'member' ||
+      member.status === 'administrator' ||
+      member.status === 'creator'
+    );
+
+  } catch {
+
+    return false;
+
+  }
+
+}
+
+// =======================
 // START COMMAND
 // =======================
 
@@ -93,35 +172,29 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
 
   const referrerId = match[1];
 
-  // SAVE USERS
+  // SAVE USER
+
   if (!users.includes(chatId)) {
 
     users.push(chatId);
 
-    fs.writeFileSync(
+    saveJSON(
       'users.json',
-      JSON.stringify(users, null, 2)
+      users
     );
 
   }
 
-  // CHECK CHANNEL JOIN
-  try {
+  // FORCE JOIN
 
-    const member =
-      await bot.getChatMember(
-        CHANNEL_USERNAME,
-        chatId
-      );
+  const joined =
+    await checkJoin(chatId);
 
-    if (
-      member.status === 'left' ||
-      member.status === 'kicked'
-    ) {
+  if (!joined) {
 
-      return bot.sendMessage(
-        chatId,
-`🚫 You must join our channel first.`,
+    return bot.sendMessage(
+      chatId,
+`🚫 Please join our channel first.`,
 {
   reply_markup: {
     inline_keyboard: [
@@ -140,20 +213,12 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
     ]
   }
 }
-      );
-
-    }
-
-  } catch {
-
-    return bot.sendMessage(
-      chatId,
-      "❌ Bot must be admin in channel."
     );
 
   }
 
-  // REFERRALS
+  // REFERRAL SYSTEM
+
   if (
     referrerId &&
     referrerId !== chatId
@@ -171,9 +236,9 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
 
       referrals[referrerId].push(chatId);
 
-      fs.writeFileSync(
+      saveJSON(
         'referrals.json',
-        JSON.stringify(referrals, null, 2)
+        referrals
       );
 
       // FREE COUPON AFTER 5 REFERRALS
@@ -201,9 +266,9 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
             referrerId,
 `🎉 Congratulations!
 
-You completed 5 referrals.
+🎁 You completed 5 referrals.
 
-🎁 FREE Coupon:
+FREE Coupon:
 
 ${freeCode}`
           );
@@ -225,9 +290,11 @@ ${freeCode}`
     chatId,
 `${product.details}
 
-💵 Price: ₹${product.price} per code
+💵 Price:
+₹${product.price} per code
 
-👥 Referrals: ${referralCount}/5
+👥 Referrals:
+${referralCount}/5
 
 🔗 Your Referral Link:
 https://t.me/codebasket?start=${chatId}
@@ -236,7 +303,7 @@ https://t.me/codebasket?start=${chatId}
 {
   reply_markup: {
     keyboard: [
-      ["🛒 Buy Coupon", "📊 Available Stock"],
+      ["🛒 Buy Coupon", "📊 Stock"],
       ["👥 Referrals", "📦 My Orders"],
       ["📞 Support", "👤 Owner"]
     ],
@@ -268,25 +335,25 @@ bot.onText(/\/admin/, (msg) => {
     chatId,
 `🔐 ADMIN PANEL
 
-👥 Total Users:
+👥 Users:
 ${users.length}
 
-📦 Total Orders:
+📦 Orders:
 ${stats.totalOrders}
 
-💰 Total Revenue:
+💰 Revenue:
 ₹${stats.totalRevenue}
 
-🎟 Current Stock:
+🎟 Stock:
 ${getStock(product.file)}
 
-👥 Total Referrals:
+👥 Referrals:
 ${Object.keys(referrals).length}`,
 {
   reply_markup: {
     keyboard: [
-      ["📊 Stats", "📦 Stock"],
-      ["📋 Orders"],
+      ["📊 Stats", "📦 Orders"],
+      ["🎟 Stock"],
       ["🛒 Buy Coupon"]
     ],
     resize_keyboard: true
@@ -308,7 +375,10 @@ bot.on('message', async (msg) => {
 
   if (msg.text.startsWith('/start')) return;
 
-  // STATS
+  // ===================
+  // ADMIN BUTTONS
+  // ===================
+
   if (msg.text === "📊 Stats") {
 
     if (chatId !== ADMIN_ID) return;
@@ -332,21 +402,7 @@ ${getStock(product.file)}`
 
   }
 
-  // STOCK
-  if (msg.text === "📦 Stock") {
-
-    if (chatId !== ADMIN_ID) return;
-
-    return bot.sendMessage(
-      chatId,
-`🎟 Current Stock:
-${getStock(product.file)}`
-    );
-
-  }
-
-  // ORDERS
-  if (msg.text === "📋 Orders") {
+  if (msg.text === "📦 Orders") {
 
     if (chatId !== ADMIN_ID) return;
 
@@ -358,7 +414,22 @@ ${stats.totalOrders}`
 
   }
 
-  // SUPPORT
+  if (msg.text === "🎟 Stock") {
+
+    if (chatId !== ADMIN_ID) return;
+
+    return bot.sendMessage(
+      chatId,
+`🎟 Current Stock:
+${getStock(product.file)}`
+    );
+
+  }
+
+  // ===================
+  // USER BUTTONS
+  // ===================
+
   if (msg.text === "📞 Support") {
 
     return bot.sendMessage(
@@ -368,7 +439,6 @@ ${stats.totalOrders}`
 
   }
 
-  // OWNER
   if (msg.text === "👤 Owner") {
 
     return bot.sendMessage(
@@ -378,28 +448,7 @@ ${stats.totalOrders}`
 
   }
 
-  // REFERRALS
-  if (msg.text === "👥 Referrals") {
-
-    const count =
-      referrals[chatId]
-        ? referrals[chatId].length
-        : 0;
-
-    return bot.sendMessage(
-      chatId,
-`👥 Your Referrals: ${count}/5
-
-🎁 Get 1 FREE coupon after 5 referrals.
-
-🔗 Your Link:
-https://t.me/codebasket?start=${chatId}`
-    );
-
-  }
-
-  // STOCK
-  if (msg.text === "📊 Available Stock") {
+  if (msg.text === "📊 Stock") {
 
     return bot.sendMessage(
       chatId,
@@ -409,12 +458,33 @@ ${getStock(product.file)}`
 
   }
 
-  // MY ORDERS
+  if (msg.text === "👥 Referrals") {
+
+    const count =
+      referrals[chatId]
+        ? referrals[chatId].length
+        : 0;
+
+    return bot.sendMessage(
+      chatId,
+`👥 Referrals:
+${count}/5
+
+🎁 Get 1 FREE coupon after 5 referrals.
+
+🔗 Your Link:
+https://t.me/codebasket?start=${chatId}`
+    );
+
+  }
+
   if (msg.text === "📦 My Orders") {
 
-    const orders = userOrders[chatId];
+    const orders =
+      userOrders[chatId];
 
-    if (!orders || orders.length === 0) {
+    if (!orders ||
+        orders.length === 0) {
 
       return bot.sendMessage(
         chatId,
@@ -423,7 +493,8 @@ ${getStock(product.file)}`
 
     }
 
-    let text = "📦 Your Orders:\n\n";
+    let text =
+      "📦 Your Orders:\n\n";
 
     orders.forEach((order, index) => {
 
@@ -440,11 +511,17 @@ ${order.qty}
 
     });
 
-    return bot.sendMessage(chatId, text);
+    return bot.sendMessage(
+      chatId,
+      text
+    );
 
   }
 
+  // ===================
   // BUY COUPON
+  // ===================
+
   if (msg.text === "🛒 Buy Coupon") {
 
     return bot.sendMessage(
@@ -454,7 +531,7 @@ ${order.qty}
 💵 Price:
 ₹${product.price}
 
-📊 Stock Available:
+📊 Stock:
 ${getStock(product.file)}
 
 📦 Enter quantity (1-50):`
@@ -462,8 +539,12 @@ ${getStock(product.file)}
 
   }
 
-  // QUANTITY
-  const qty = parseInt(msg.text);
+  // ===================
+  // QUANTITY INPUT
+  // ===================
+
+  const qty =
+    parseInt(msg.text);
 
   if (isNaN(qty)) return;
 
@@ -496,7 +577,10 @@ ${getStock(product.file)}
     total
   };
 
+  // ===================
   // PAYMENT QR
+  // ===================
+
   bot.sendPhoto(
     chatId,
     './qr.jpg',
@@ -510,7 +594,7 @@ ${qty}
 💰 Total:
 ₹${total}
 
-📲 Scan QR and complete payment.
+📲 Scan QR and pay.
 
 After payment click below.`,
       reply_markup: {
@@ -538,43 +622,26 @@ bot.on('callback_query', async (query) => {
     String(query.message.chat.id);
 
   // VERIFY JOIN
+
   if (query.data === "verify_join") {
 
-    try {
+    const joined =
+      await checkJoin(chatId);
 
-      const member =
-        await bot.getChatMember(
-          CHANNEL_USERNAME,
-          chatId
-        );
-
-      if (
-        member.status === 'member' ||
-        member.status === 'administrator' ||
-        member.status === 'creator'
-      ) {
-
-        bot.sendMessage(
-          chatId,
-`✅ Verification Successful!
-
-Send /start again.`
-        );
-
-      } else {
-
-        bot.sendMessage(
-          chatId,
-          "❌ You still have not joined channel."
-        );
-
-      }
-
-    } catch {
+    if (joined) {
 
       bot.sendMessage(
         chatId,
-        "❌ Verification Failed."
+`✅ Verification Successful!
+
+Send /start again.`
+      );
+
+    } else {
+
+      bot.sendMessage(
+        chatId,
+        "❌ Join the channel first."
       );
 
     }
@@ -582,6 +649,7 @@ Send /start again.`
   }
 
   // USER PAID
+
   if (query.data === "paid") {
 
     const order =
@@ -607,11 +675,13 @@ ${order.qty}
       [
         {
           text: "✅ APPROVE",
-          callback_data: `approve_${chatId}`
+          callback_data:
+            `approve_${chatId}`
         },
         {
           text: "❌ REJECT",
-          callback_data: `reject_${chatId}`
+          callback_data:
+            `reject_${chatId}`
         }
       ]
     ]
@@ -627,7 +697,10 @@ ${order.qty}
   }
 
   // APPROVE
-  if (query.data.startsWith("approve_")) {
+
+  if (
+    query.data.startsWith("approve_")
+  ) {
 
     if (
       String(query.from.id)
@@ -657,7 +730,8 @@ ${order.qty}
       remaining.join('\n')
     );
 
-    // SAVE ORDER
+    // SAVE ORDERS
+
     if (!userOrders[userId]) {
 
       userOrders[userId] = [];
@@ -669,19 +743,20 @@ ${order.qty}
       total: order.total
     });
 
-    fs.writeFileSync(
+    saveJSON(
       'orders.json',
-      JSON.stringify(userOrders, null, 2)
+      userOrders
     );
 
     // UPDATE STATS
+
     stats.totalOrders += 1;
 
     stats.totalRevenue += order.total;
 
-    fs.writeFileSync(
+    saveJSON(
       'stats.json',
-      JSON.stringify(stats, null, 2)
+      stats
     );
 
     let text =
@@ -702,12 +777,22 @@ ${order.qty}
       text
     );
 
+    // DELETE ADMIN MESSAGE
+
+    bot.deleteMessage(
+      ADMIN_ID,
+      query.message.message_id
+    ).catch(() => {});
+
     delete pendingOrders[userId];
 
   }
 
   // REJECT
-  if (query.data.startsWith("reject_")) {
+
+  if (
+    query.data.startsWith("reject_")
+  ) {
 
     if (
       String(query.from.id)
@@ -723,34 +808,19 @@ ${order.qty}
       "❌ Payment Rejected"
     );
 
+    // DELETE ADMIN MESSAGE
+
+    bot.deleteMessage(
+      ADMIN_ID,
+      query.message.message_id
+    ).catch(() => {});
+
     delete pendingOrders[userId];
 
   }
 
 });
 
-// =======================
-// FUNCTIONS
-// =======================
-
-function getCodes(file) {
-
-  if (!fs.existsSync(file))
-    return [];
-
-  return fs.readFileSync(
-    file,
-    'utf-8'
-  )
-  .split('\n')
-  .filter(
-    code => code.trim() !== ''
-  );
-
-}
-
-function getStock(file) {
-
-  return getCodes(file).length;
-
-}
+console.log(
+  "✅ CodeBasketBot Running..."
+);
