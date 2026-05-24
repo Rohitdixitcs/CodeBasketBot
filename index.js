@@ -13,10 +13,19 @@ const CHANNEL_USERNAME = "@codebasketofficial";
 
 const pendingOrders = {};
 
+// =======================
+// LOAD FILES
+// =======================
+
 let userOrders = {};
 let referrals = {};
+let users = [];
 
-// LOAD ORDERS
+let stats = {
+  totalOrders: 0,
+  totalRevenue: 0
+};
+
 if (fs.existsSync('orders.json')) {
 
   userOrders = JSON.parse(
@@ -25,7 +34,6 @@ if (fs.existsSync('orders.json')) {
 
 }
 
-// LOAD REFERRALS
 if (fs.existsSync('referrals.json')) {
 
   referrals = JSON.parse(
@@ -34,7 +42,26 @@ if (fs.existsSync('referrals.json')) {
 
 }
 
-// PRODUCT
+if (fs.existsSync('users.json')) {
+
+  users = JSON.parse(
+    fs.readFileSync('users.json')
+  );
+
+}
+
+if (fs.existsSync('stats.json')) {
+
+  stats = JSON.parse(
+    fs.readFileSync('stats.json')
+  );
+
+}
+
+// =======================
+// PRODUCT DETAILS
+// =======================
+
 const product = {
 
   name: "🛒 BigBasket ₹100 OFF",
@@ -56,20 +83,36 @@ const product = {
 
 };
 
-// START
+// =======================
+// START COMMAND
+// =======================
+
 bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
 
   const chatId = String(msg.chat.id);
 
   const referrerId = match[1];
 
+  // SAVE USERS
+  if (!users.includes(chatId)) {
+
+    users.push(chatId);
+
+    fs.writeFileSync(
+      'users.json',
+      JSON.stringify(users, null, 2)
+    );
+
+  }
+
   // CHECK CHANNEL JOIN
   try {
 
-    const member = await bot.getChatMember(
-      CHANNEL_USERNAME,
-      chatId
-    );
+    const member =
+      await bot.getChatMember(
+        CHANNEL_USERNAME,
+        chatId
+      );
 
     if (
       member.status === 'left' ||
@@ -101,7 +144,7 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
 
     }
 
-  } catch (err) {
+  } catch {
 
     return bot.sendMessage(
       chatId,
@@ -110,8 +153,7 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
 
   }
 
-  // REFERRAL SYSTEM
-
+  // REFERRALS
   if (
     referrerId &&
     referrerId !== chatId
@@ -134,19 +176,21 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
         JSON.stringify(referrals, null, 2)
       );
 
-      // FREE CODE AFTER 5 REFERRALS
+      // FREE COUPON AFTER 5 REFERRALS
 
       if (
         referrals[referrerId].length % 5 === 0
       ) {
 
-        const codes = getCodes(product.file);
+        const codes =
+          getCodes(product.file);
 
         if (codes.length > 0) {
 
           const freeCode = codes[0];
 
-          const remaining = codes.slice(1);
+          const remaining =
+            codes.slice(1);
 
           fs.writeFileSync(
             product.file,
@@ -203,13 +247,117 @@ https://t.me/codebasket?start=${chatId}
 
 });
 
-// MAIN MESSAGE
-bot.on('message', async (msg) => {
+// =======================
+// ADMIN PANEL
+// =======================
+
+bot.onText(/\/admin/, (msg) => {
 
   const chatId = String(msg.chat.id);
+
+  if (chatId !== ADMIN_ID) {
+
+    return bot.sendMessage(
+      chatId,
+      "❌ Access Denied"
+    );
+
+  }
+
+  bot.sendMessage(
+    chatId,
+`🔐 ADMIN PANEL
+
+👥 Total Users:
+${users.length}
+
+📦 Total Orders:
+${stats.totalOrders}
+
+💰 Total Revenue:
+₹${stats.totalRevenue}
+
+🎟 Current Stock:
+${getStock(product.file)}
+
+👥 Total Referrals:
+${Object.keys(referrals).length}`,
+{
+  reply_markup: {
+    keyboard: [
+      ["📊 Stats", "📦 Stock"],
+      ["📋 Orders"],
+      ["🛒 Buy Coupon"]
+    ],
+    resize_keyboard: true
+  }
+}
+  );
+
+});
+
+// =======================
+// MAIN MESSAGE HANDLER
+// =======================
+
+bot.on('message', async (msg) => {
+
   if (!msg.text) return;
 
-if (msg.text.startsWith('/start')) return;
+  const chatId = String(msg.chat.id);
+
+  if (msg.text.startsWith('/start')) return;
+
+  // STATS
+  if (msg.text === "📊 Stats") {
+
+    if (chatId !== ADMIN_ID) return;
+
+    return bot.sendMessage(
+      chatId,
+`📊 BOT STATS
+
+👥 Users:
+${users.length}
+
+📦 Orders:
+${stats.totalOrders}
+
+💰 Revenue:
+₹${stats.totalRevenue}
+
+🎟 Stock:
+${getStock(product.file)}`
+    );
+
+  }
+
+  // STOCK
+  if (msg.text === "📦 Stock") {
+
+    if (chatId !== ADMIN_ID) return;
+
+    return bot.sendMessage(
+      chatId,
+`🎟 Current Stock:
+${getStock(product.file)}`
+    );
+
+  }
+
+  // ORDERS
+  if (msg.text === "📋 Orders") {
+
+    if (chatId !== ADMIN_ID) return;
+
+    return bot.sendMessage(
+      chatId,
+`📦 Total Orders:
+${stats.totalOrders}`
+    );
+
+  }
+
   // SUPPORT
   if (msg.text === "📞 Support") {
 
@@ -261,7 +409,7 @@ ${getStock(product.file)}`
 
   }
 
-  // ORDERS
+  // MY ORDERS
   if (msg.text === "📦 My Orders") {
 
     const orders = userOrders[chatId];
@@ -282,9 +430,11 @@ ${getStock(product.file)}`
       text +=
 `#${index + 1}
 
-📦 Quantity: ${order.qty}
+📦 Quantity:
+${order.qty}
 
-💰 Amount: ₹${order.total}
+💰 Amount:
+₹${order.total}
 
 `;
 
@@ -294,16 +444,17 @@ ${getStock(product.file)}`
 
   }
 
-  // BUY
+  // BUY COUPON
   if (msg.text === "🛒 Buy Coupon") {
 
     return bot.sendMessage(
       chatId,
 `${product.details}
 
-💵 Price: ₹${product.price}
+💵 Price:
+₹${product.price}
 
-📊 Stock:
+📊 Stock Available:
 ${getStock(product.file)}
 
 📦 Enter quantity (1-50):`
@@ -325,7 +476,8 @@ ${getStock(product.file)}
 
   }
 
-  const codes = getCodes(product.file);
+  const codes =
+    getCodes(product.file);
 
   if (qty > codes.length) {
 
@@ -336,13 +488,15 @@ ${getStock(product.file)}
 
   }
 
-  const total = qty * product.price;
+  const total =
+    qty * product.price;
 
   pendingOrders[chatId] = {
     qty,
     total
   };
 
+  // PAYMENT QR
   bot.sendPhoto(
     chatId,
     './qr.jpg',
@@ -350,11 +504,13 @@ ${getStock(product.file)}
       caption:
 `${product.name}
 
-📦 Quantity: ${qty}
+📦 Quantity:
+${qty}
 
-💰 Total: ₹${total}
+💰 Total:
+₹${total}
 
-📲 Scan QR and pay.
+📲 Scan QR and complete payment.
 
 After payment click below.`,
       reply_markup: {
@@ -372,10 +528,14 @@ After payment click below.`,
 
 });
 
-// CALLBACKS
+// =======================
+// CALLBACK QUERIES
+// =======================
+
 bot.on('callback_query', async (query) => {
 
-  const chatId = String(query.message.chat.id);
+  const chatId =
+    String(query.message.chat.id);
 
   // VERIFY JOIN
   if (query.data === "verify_join") {
@@ -396,7 +556,9 @@ bot.on('callback_query', async (query) => {
 
         bot.sendMessage(
           chatId,
-          "✅ Verification Successful!\n\nSend /start again."
+`✅ Verification Successful!
+
+Send /start again.`
         );
 
       } else {
@@ -422,7 +584,8 @@ bot.on('callback_query', async (query) => {
   // USER PAID
   if (query.data === "paid") {
 
-    const order = pendingOrders[chatId];
+    const order =
+      pendingOrders[chatId];
 
     if (!order) return;
 
@@ -454,7 +617,7 @@ ${order.qty}
     ]
   }
 }
-);
+    );
 
     bot.sendMessage(
       chatId,
@@ -467,18 +630,21 @@ ${order.qty}
   if (query.data.startsWith("approve_")) {
 
     if (
-      String(query.from.id) !== ADMIN_ID
+      String(query.from.id)
+      !== ADMIN_ID
     ) return;
 
     const userId = String(
       query.data.split("_")[1]
     );
 
-    const order = pendingOrders[userId];
+    const order =
+      pendingOrders[userId];
 
     if (!order) return;
 
-    const codes = getCodes(product.file);
+    const codes =
+      getCodes(product.file);
 
     const selectedCodes =
       codes.slice(0, order.qty);
@@ -491,6 +657,7 @@ ${order.qty}
       remaining.join('\n')
     );
 
+    // SAVE ORDER
     if (!userOrders[userId]) {
 
       userOrders[userId] = [];
@@ -507,6 +674,16 @@ ${order.qty}
       JSON.stringify(userOrders, null, 2)
     );
 
+    // UPDATE STATS
+    stats.totalOrders += 1;
+
+    stats.totalRevenue += order.total;
+
+    fs.writeFileSync(
+      'stats.json',
+      JSON.stringify(stats, null, 2)
+    );
+
     let text =
 `✅ Payment Approved
 
@@ -520,7 +697,10 @@ ${order.qty}
 
     });
 
-    bot.sendMessage(userId, text);
+    bot.sendMessage(
+      userId,
+      text
+    );
 
     delete pendingOrders[userId];
 
@@ -530,7 +710,8 @@ ${order.qty}
   if (query.data.startsWith("reject_")) {
 
     if (
-      String(query.from.id) !== ADMIN_ID
+      String(query.from.id)
+      !== ADMIN_ID
     ) return;
 
     const userId = String(
@@ -548,18 +729,23 @@ ${order.qty}
 
 });
 
+// =======================
 // FUNCTIONS
+// =======================
 
 function getCodes(file) {
 
-  if (!fs.existsSync(file)) return [];
+  if (!fs.existsSync(file))
+    return [];
 
   return fs.readFileSync(
     file,
     'utf-8'
   )
   .split('\n')
-  .filter(code => code.trim() !== '');
+  .filter(
+    code => code.trim() !== ''
+  );
 
 }
 
