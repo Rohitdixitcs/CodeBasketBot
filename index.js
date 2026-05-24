@@ -244,51 +244,64 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
   // REFERRAL SYSTEM
   // =======================
 
+  // =======================
+// REFERRAL SYSTEM
+// =======================
+
+if (
+  referrerId &&
+  referrerId !== chatId &&
+  !users.includes(chatId + "_referred")
+) {
+
+  if (!referrals[referrerId]) {
+
+    referrals[referrerId] = [];
+
+  }
+
   if (
-    referrerId &&
-    referrerId !== chatId
+    !referrals[referrerId].includes(chatId)
   ) {
 
-    if (!referrals[referrerId]) {
+    referrals[referrerId].push(chatId);
 
-      referrals[referrerId] = [];
+    // MARK USER AS REFERRED
+    users.push(chatId + "_referred");
 
-    }
+    saveJSON(
+      'users.json',
+      users
+    );
+
+    saveJSON(
+      'referrals.json',
+      referrals
+    );
+
+    // FREE COUPON AFTER 5 REFERRALS
 
     if (
-      !referrals[referrerId].includes(chatId)
+      referrals[referrerId].length % 5 === 0
     ) {
 
-      referrals[referrerId].push(chatId);
+      const codes =
+        getCodes(product.file);
 
-      saveJSON(
-        'referrals.json',
-        referrals
-      );
+      if (codes.length > 0) {
 
-      // FREE COUPON AFTER 5 REFERRALS
+        const freeCode = codes[0];
 
-      if (
-        referrals[referrerId].length % 5 === 0
-      ) {
+        const remaining =
+          codes.slice(1);
 
-        const codes =
-          getCodes(product.file);
+        fs.writeFileSync(
+          product.file,
+          remaining.join('\n')
+        );
 
-        if (codes.length > 0) {
-
-          const freeCode = codes[0];
-
-          const remaining =
-            codes.slice(1);
-
-          fs.writeFileSync(
-            product.file,
-            remaining.join('\n')
-          );
-
-          bot.sendMessage(
-            referrerId,
+        bot.sendMessage(
+          referrerId,
 `🎉 Congratulations!
 
 🎁 You completed 5 referrals.
@@ -296,9 +309,7 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
 FREE Coupon:
 
 ${freeCode}`
-          );
-
-        }
+        );
 
       }
 
@@ -306,6 +317,7 @@ ${freeCode}`
 
   }
 
+}
   const referralCount =
     referrals[chatId]
       ? referrals[chatId].length
