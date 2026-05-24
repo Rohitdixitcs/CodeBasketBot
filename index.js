@@ -8,7 +8,6 @@ const fs = require('fs');
 // =======================
 
 process.on('uncaughtException', console.error);
-
 process.on('unhandledRejection', console.error);
 
 // =======================
@@ -27,10 +26,11 @@ const bot = new TelegramBot(process.env.BOT_TOKEN, {
 
 const ADMIN_ID = String(process.env.ADMIN_ID);
 
-const CHANNEL_USERNAME = "@codebasketofficial";
+const MAIN_CHANNEL = "@codebasketofficial";
+const DISCUSSION_GROUP = "@codebasket";
 
 // =======================
-// MEMORY CACHE
+// MEMORY
 // =======================
 
 const pendingOrders = {};
@@ -54,6 +54,15 @@ function loadJSON(file, defaultData) {
 
   return JSON.parse(
     fs.readFileSync(file)
+  );
+
+}
+
+function saveJSON(file, data) {
+
+  fs.writeFileSync(
+    file,
+    JSON.stringify(data, null, 2)
   );
 
 }
@@ -125,15 +134,6 @@ function getStock(file) {
 
 }
 
-function saveJSON(file, data) {
-
-  fs.writeFileSync(
-    file,
-    JSON.stringify(data, null, 2)
-  );
-
-}
-
 // =======================
 // FORCE JOIN CHECK
 // =======================
@@ -142,16 +142,29 @@ async function checkJoin(chatId) {
 
   try {
 
-    const member =
+    const main =
       await bot.getChatMember(
-        CHANNEL_USERNAME,
+        MAIN_CHANNEL,
         chatId
       );
 
+    const group =
+      await bot.getChatMember(
+        DISCUSSION_GROUP,
+        chatId
+      );
+
+    const mainJoined =
+      ['member', 'administrator', 'creator']
+      .includes(main.status);
+
+    const groupJoined =
+      ['member', 'administrator', 'creator']
+      .includes(group.status);
+
     return (
-      member.status === 'member' ||
-      member.status === 'administrator' ||
-      member.status === 'creator'
+      mainJoined &&
+      groupJoined
     );
 
   } catch {
@@ -194,22 +207,32 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
 
     return bot.sendMessage(
       chatId,
-`🚫 Please join our channel first.`,
+`🚫 Please join both channels first.`,
 {
   reply_markup: {
     inline_keyboard: [
+
       [
         {
           text: "📢 Join Channel",
           url: "https://t.me/codebasketofficial"
         }
       ],
+
+      [
+        {
+          text: "💬 Join Discussion",
+          url: "https://t.me/codebasket"
+        }
+      ],
+
       [
         {
           text: "✅ Verify Join",
           callback_data: "verify_join"
         }
       ]
+
     ]
   }
 }
@@ -217,7 +240,9 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
 
   }
 
+  // =======================
   // REFERRAL SYSTEM
+  // =======================
 
   if (
     referrerId &&
@@ -297,7 +322,7 @@ ${freeCode}`
 ${referralCount}/5
 
 🔗 Your Referral Link:
-https://t.me/codebasket?start=${chatId}
+https://t.me/codebasketbot?start=${chatId}
 
 🛍 Choose Option Below`,
 {
@@ -375,9 +400,9 @@ bot.on('message', async (msg) => {
 
   if (msg.text.startsWith('/start')) return;
 
-  // ===================
+  // =======================
   // ADMIN BUTTONS
-  // ===================
+  // =======================
 
   if (msg.text === "📊 Stats") {
 
@@ -426,9 +451,9 @@ ${getStock(product.file)}`
 
   }
 
-  // ===================
+  // =======================
   // USER BUTTONS
-  // ===================
+  // =======================
 
   if (msg.text === "📞 Support") {
 
@@ -473,7 +498,7 @@ ${count}/5
 🎁 Get 1 FREE coupon after 5 referrals.
 
 🔗 Your Link:
-https://t.me/codebasket?start=${chatId}`
+https://t.me/codebasketbot?start=${chatId}`
     );
 
   }
@@ -518,9 +543,9 @@ ${order.qty}
 
   }
 
-  // ===================
+  // =======================
   // BUY COUPON
-  // ===================
+  // =======================
 
   if (msg.text === "🛒 Buy Coupon") {
 
@@ -539,9 +564,9 @@ ${getStock(product.file)}
 
   }
 
-  // ===================
+  // =======================
   // QUANTITY INPUT
-  // ===================
+  // =======================
 
   const qty =
     parseInt(msg.text);
@@ -577,9 +602,9 @@ ${getStock(product.file)}
     total
   };
 
-  // ===================
+  // =======================
   // PAYMENT QR
-  // ===================
+  // =======================
 
   bot.sendPhoto(
     chatId,
@@ -641,7 +666,7 @@ Send /start again.`
 
       bot.sendMessage(
         chatId,
-        "❌ Join the channel first."
+        "❌ Please join both channels first."
       );
 
     }
@@ -807,8 +832,6 @@ ${order.qty}
       userId,
       "❌ Payment Rejected"
     );
-
-    // DELETE ADMIN MESSAGE
 
     bot.deleteMessage(
       ADMIN_ID,
