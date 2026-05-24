@@ -207,9 +207,9 @@ https://t.me/codebasket?start=${chatId}
 bot.on('message', async (msg) => {
 
   const chatId = String(msg.chat.id);
+  if (!msg.text) return;
 
-  if (msg.text.startsWith('/start')) return;
-
+if (msg.text.startsWith('/start')) return;
   // SUPPORT
   if (msg.text === "📞 Support") {
 
