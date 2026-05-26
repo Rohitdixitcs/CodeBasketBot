@@ -24,7 +24,7 @@ const bot = new TelegramBot(process.env.BOT_TOKEN, {
   }
 });
 
-const ADMIN_ID = String(process.env.ADMIN_ID);
+const ADMIN_ID = "8785399401";
 
 const MAIN_CHANNEL = "@codebasketofficial";
 const DISCUSSION_GROUP = "@codebasket";
@@ -34,6 +34,10 @@ const DISCUSSION_GROUP = "@codebasket";
 // =======================
 
 const pendingOrders = {};
+
+let broadcastMode = false;
+
+let orderCounter = 1000;
 
 // =======================
 // LOAD JSON FILES
@@ -76,6 +80,9 @@ let referrals =
 let users =
   loadJSON('users.json', []);
 
+let deliveries =
+  loadJSON('deliveries.json', []);
+
 let stats =
   loadJSON('stats.json', {
     totalOrders: 0,
@@ -92,18 +99,18 @@ const product = {
 
   file: "bigbasket.txt",
 
-  price: 6,
+  price: 7.5,
 
   details:
-`🛒 BigBasket Offer
+`<b><u>🛒 BigBasket Offer</u></b>
 
-💰 ₹100 OFF on ₹100+
+<b>💰 ₹100 OFF on ₹100+</b>
 
-🍫 Valid on Chocolate / Ice Cream Orders
+<i>🍫 Valid on Chocolate / Ice Cream Orders</i>
 
-🆕 Valid only for users who never ordered from BigBasket before
+<b>🆕 First Order Only</b>
 
-⚠ Coupon may not work on old/existing accounts`
+⚠️ May not work on old accounts`
 
 };
 
@@ -207,8 +214,9 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
 
     return bot.sendMessage(
       chatId,
-`🚫 Please join both channels first.`,
+`<b>🚫 Please Join Both Channels First</b>`,
 {
+  parse_mode: "HTML",
   reply_markup: {
     inline_keyboard: [
 
@@ -244,80 +252,40 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
   // REFERRAL SYSTEM
   // =======================
 
-  // =======================
-// REFERRAL SYSTEM
-// =======================
-
-if (
-  referrerId &&
-  referrerId !== chatId &&
-  !users.includes(chatId + "_referred")
-) {
-
-  if (!referrals[referrerId]) {
-
-    referrals[referrerId] = [];
-
-  }
-
   if (
-    !referrals[referrerId].includes(chatId)
+    referrerId &&
+    referrerId !== chatId &&
+    !users.includes(chatId + "_referred")
   ) {
 
-    referrals[referrerId].push(chatId);
+    if (!referrals[referrerId]) {
 
-    // MARK USER AS REFERRED
-    users.push(chatId + "_referred");
+      referrals[referrerId] = [];
 
-    saveJSON(
-      'users.json',
-      users
-    );
-
-    saveJSON(
-      'referrals.json',
-      referrals
-    );
-
-    // FREE COUPON AFTER 5 REFERRALS
+    }
 
     if (
-      referrals[referrerId].length % 5 === 0
+      !referrals[referrerId].includes(chatId)
     ) {
 
-      const codes =
-        getCodes(product.file);
+      referrals[referrerId].push(chatId);
 
-      if (codes.length > 0) {
+      users.push(chatId + "_referred");
 
-        const freeCode = codes[0];
+      saveJSON(
+        'users.json',
+        users
+      );
 
-        const remaining =
-          codes.slice(1);
-
-        fs.writeFileSync(
-          product.file,
-          remaining.join('\n')
-        );
-
-        bot.sendMessage(
-          referrerId,
-`🎉 Congratulations!
-
-🎁 You completed 5 referrals.
-
-FREE Coupon:
-
-${freeCode}`
-        );
-
-      }
+      saveJSON(
+        'referrals.json',
+        referrals
+      );
 
     }
 
   }
 
-}
   const referralCount =
     referrals[chatId]
       ? referrals[chatId].length
@@ -327,17 +295,15 @@ ${freeCode}`
     chatId,
 `${product.details}
 
-💵 Price:
-₹${product.price} per code
+<b>💵 Price:</b> ₹${product.price}
 
-👥 Referrals:
-${referralCount}/5
+<b>👥 Referrals:</b> ${referralCount}/5
 
-🔗 Your Referral Link:
-https://t.me/codebasketbot?start=${chatId}
+<b>🔗 Your Referral Link:</b>
 
-🛍 Choose Option Below`,
+https://t.me/codebasketbot?start=${chatId}`,
 {
+  parse_mode: "HTML",
   reply_markup: {
     keyboard: [
       ["🛒 Buy Coupon", "📊 Stock"],
@@ -370,27 +336,31 @@ bot.onText(/\/admin/, (msg) => {
 
   bot.sendMessage(
     chatId,
-`🔐 ADMIN PANEL
+`<b><u>🔐 ADMIN PANEL</u></b>
 
-👥 Users:
-${users.length}
+<b>👥 Users:</b> ${
+users.filter(
+u => !u.includes("_referred")
+).length}
 
-📦 Orders:
-${stats.totalOrders}
+<b>📦 Orders:</b> ${
+stats.totalOrders}
 
-💰 Revenue:
-₹${stats.totalRevenue}
+<b>💰 Revenue:</b> ₹${
+stats.totalRevenue}
 
-🎟 Stock:
-${getStock(product.file)}
+<b>🎟 Stock:</b> ${
+getStock(product.file)}
 
-👥 Referrals:
-${Object.keys(referrals).length}`,
+<b>👥 Referrals:</b> ${
+Object.keys(referrals).length}`,
 {
+  parse_mode: "HTML",
   reply_markup: {
     keyboard: [
       ["📊 Stats", "📦 Orders"],
-      ["🎟 Stock"],
+      ["🎟 Stock", "👥 Users"],
+      ["📢 Broadcast", "🧹 Clear Pending"],
       ["🛒 Buy Coupon"]
     ],
     resize_keyboard: true
@@ -406,11 +376,31 @@ ${Object.keys(referrals).length}`,
 
 bot.on('message', async (msg) => {
 
+  const chatId =
+    String(msg.chat.id);
+
   if (!msg.text) return;
 
-  const chatId = String(msg.chat.id);
-
   if (msg.text.startsWith('/start')) return;
+
+  // =======================
+  // LOW STOCK WARNING
+  // =======================
+
+  if (
+    getStock(product.file) <= 10
+  ) {
+
+    bot.sendMessage(
+      ADMIN_ID,
+`⚠️ LOW STOCK WARNING
+
+Only ${
+getStock(product.file)
+} coupons left.`
+    ).catch(() => {});
+
+  }
 
   // =======================
   // ADMIN BUTTONS
@@ -422,19 +412,19 @@ bot.on('message', async (msg) => {
 
     return bot.sendMessage(
       chatId,
-`📊 BOT STATS
+`<b>📊 BOT STATS</b>
 
-👥 Users:
+<b>👥 Users:</b>
 ${users.length}
 
-📦 Orders:
+<b>📦 Orders:</b>
 ${stats.totalOrders}
 
-💰 Revenue:
-₹${stats.totalRevenue}
-
-🎟 Stock:
-${getStock(product.file)}`
+<b>💰 Revenue:</b>
+₹${stats.totalRevenue}`,
+{
+  parse_mode: "HTML"
+}
     );
 
   }
@@ -445,8 +435,12 @@ ${getStock(product.file)}`
 
     return bot.sendMessage(
       chatId,
-`📦 Total Orders:
-${stats.totalOrders}`
+`<b>📦 Total Orders:</b>
+
+${stats.totalOrders}`,
+{
+  parse_mode: "HTML"
+}
     );
 
   }
@@ -457,8 +451,100 @@ ${stats.totalOrders}`
 
     return bot.sendMessage(
       chatId,
-`🎟 Current Stock:
-${getStock(product.file)}`
+`<b>🎟 Current Stock:</b>
+
+${getStock(product.file)}`,
+{
+  parse_mode: "HTML"
+}
+    );
+
+  }
+
+  if (msg.text === "👥 Users") {
+
+    if (chatId !== ADMIN_ID) return;
+
+    return bot.sendMessage(
+      chatId,
+`<b>👥 Total Users:</b>
+
+${users.length}`,
+{
+  parse_mode: "HTML"
+}
+    );
+
+  }
+
+  if (msg.text === "🧹 Clear Pending") {
+
+    if (chatId !== ADMIN_ID) return;
+
+    Object.keys(pendingOrders).forEach(id => {
+      delete pendingOrders[id];
+    });
+
+    return bot.sendMessage(
+      chatId,
+      "✅ Pending Orders Cleared"
+    );
+
+  }
+
+  // =======================
+  // BROADCAST
+  // =======================
+
+  if (msg.text === "📢 Broadcast") {
+
+    if (chatId !== ADMIN_ID) return;
+
+    broadcastMode = true;
+
+    return bot.sendMessage(
+      chatId,
+      "📢 Send Broadcast Message"
+    );
+
+  }
+
+  if (
+    broadcastMode &&
+    chatId === ADMIN_ID
+  ) {
+
+    broadcastMode = false;
+
+    let success = 0;
+
+    for (const user of users) {
+
+      if (
+        user.includes("_referred")
+      ) continue;
+
+      try {
+
+        await bot.sendMessage(
+          user,
+`📢 <b>Broadcast Message</b>
+
+${msg.text}`,
+{
+  parse_mode: "HTML"
+}
+        );
+
+        success++;
+
+      } catch {}
+
+    }
+
+    return bot.sendMessage(
+      chatId,
+`✅ Broadcast Sent To ${success} Users`
     );
 
   }
@@ -489,8 +575,12 @@ ${getStock(product.file)}`
 
     return bot.sendMessage(
       chatId,
-`📊 Available Coupons:
-${getStock(product.file)}`
+`<b>📊 Available Coupons:</b>
+
+${getStock(product.file)}`,
+{
+  parse_mode: "HTML"
+}
     );
 
   }
@@ -504,13 +594,18 @@ ${getStock(product.file)}`
 
     return bot.sendMessage(
       chatId,
-`👥 Referrals:
+`<b>👥 Referrals:</b>
+
 ${count}/5
 
-🎁 Get 1 FREE coupon after 5 referrals.
+🎁 Get 1 FREE Coupon After 5 Referrals
 
-🔗 Your Link:
-https://t.me/codebasketbot?start=${chatId}`
+🔗 Referral Link:
+
+https://t.me/codebasketbot?start=${chatId}`,
+{
+  parse_mode: "HTML"
+}
     );
 
   }
@@ -520,29 +615,31 @@ https://t.me/codebasketbot?start=${chatId}`
     const orders =
       userOrders[chatId];
 
-    if (!orders ||
-        orders.length === 0) {
+    if (
+      !orders ||
+      orders.length === 0
+    ) {
 
       return bot.sendMessage(
         chatId,
-        "❌ No previous orders found."
+        "❌ No Previous Orders Found"
       );
 
     }
 
     let text =
-      "📦 Your Orders:\n\n";
+      "<b>📦 Your Orders:</b>\n\n";
 
     orders.forEach((order, index) => {
 
       text +=
-`#${index + 1}
+`<b>#${index + 1}</b>
 
-📦 Quantity:
-${order.qty}
+📦 Qty: ${order.qty}
 
-💰 Amount:
-₹${order.total}
+💰 Amount: ₹${order.total}
+
+🆔 Order ID: #${order.orderId}
 
 `;
 
@@ -550,7 +647,10 @@ ${order.qty}
 
     return bot.sendMessage(
       chatId,
-      text
+      text,
+{
+  parse_mode: "HTML"
+}
     );
 
   }
@@ -565,19 +665,21 @@ ${order.qty}
       chatId,
 `${product.details}
 
-💵 Price:
-₹${product.price}
+<b>💵 Price:</b> ₹${product.price}
 
-📊 Stock:
+<b>📊 Stock:</b>
 ${getStock(product.file)}
 
-📦 Enter quantity (1-50):`
+<b>📦 Enter Quantity (1-50)</b>`,
+{
+  parse_mode: "HTML"
+}
     );
 
   }
 
   // =======================
-  // QUANTITY INPUT
+  // QUANTITY
   // =======================
 
   const qty =
@@ -589,7 +691,7 @@ ${getStock(product.file)}
 
     return bot.sendMessage(
       chatId,
-      "❌ Enter quantity between 1-50"
+      "❌ Enter Quantity Between 1-50"
     );
 
   }
@@ -601,7 +703,7 @@ ${getStock(product.file)}
 
     return bot.sendMessage(
       chatId,
-`❌ Only ${codes.length} coupons available`
+`❌ Only ${codes.length} Coupons Available`
     );
 
   }
@@ -609,9 +711,14 @@ ${getStock(product.file)}
   const total =
     qty * product.price;
 
+  orderCounter++;
+
+  const orderId = orderCounter;
+
   pendingOrders[chatId] = {
     qty,
-    total
+    total,
+    orderId
   };
 
   // =======================
@@ -623,7 +730,7 @@ ${getStock(product.file)}
     './qr.jpg',
     {
       caption:
-`${product.name}
+`<b>🛒 Order #${orderId}</b>
 
 📦 Quantity:
 ${qty}
@@ -631,26 +738,81 @@ ${qty}
 💰 Total:
 ₹${total}
 
-📲 Scan QR and pay.
+📲 Scan QR & Pay
 
-After payment click below.`,
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: "✅ I Have Paid",
-              callback_data: "paid"
-            }
-          ]
-        ]
-      }
+⚠️ After Payment Send Screenshot`,
+      parse_mode: "HTML"
     }
   );
 
 });
 
 // =======================
-// CALLBACK QUERIES
+// PAYMENT SCREENSHOT
+// =======================
+
+bot.on('photo', async (msg) => {
+
+  const chatId =
+    String(msg.chat.id);
+
+  const order =
+    pendingOrders[chatId];
+
+  if (!order) return;
+
+  const photo =
+    msg.photo[
+      msg.photo.length - 1
+    ].file_id;
+
+  bot.sendPhoto(
+    ADMIN_ID,
+    photo,
+{
+  caption:
+`<b>🛒 New Order</b>
+
+🆔 Order ID:
+#${order.orderId}
+
+👤 User:
+${chatId}
+
+📦 Quantity:
+${order.qty}
+
+💰 Amount:
+₹${order.total}`,
+  parse_mode: "HTML",
+  reply_markup: {
+    inline_keyboard: [
+      [
+        {
+          text: "✅ APPROVE",
+          callback_data:
+            `approve_${chatId}`
+        },
+        {
+          text: "❌ REJECT",
+          callback_data:
+            `reject_${chatId}`
+        }
+      ]
+    ]
+  }
+}
+  );
+
+  bot.sendMessage(
+    chatId,
+    "⏳ Payment Screenshot Sent For Verification"
+  );
+
+});
+
+// =======================
+// CALLBACKS
 // =======================
 
 bot.on('callback_query', async (query) => {
@@ -669,67 +831,17 @@ bot.on('callback_query', async (query) => {
 
       bot.sendMessage(
         chatId,
-`✅ Verification Successful!
-
-Send /start again.`
+        "✅ Verification Successful\nSend /start Again"
       );
 
     } else {
 
       bot.sendMessage(
         chatId,
-        "❌ Please join both channels first."
+        "❌ Please Join Both Channels First"
       );
 
     }
-
-  }
-
-  // USER PAID
-
-  if (query.data === "paid") {
-
-    const order =
-      pendingOrders[chatId];
-
-    if (!order) return;
-
-    bot.sendMessage(
-      ADMIN_ID,
-`🛒 New Order
-
-👤 User:
-${chatId}
-
-📦 Quantity:
-${order.qty}
-
-💰 Amount:
-₹${order.total}`,
-{
-  reply_markup: {
-    inline_keyboard: [
-      [
-        {
-          text: "✅ APPROVE",
-          callback_data:
-            `approve_${chatId}`
-        },
-        {
-          text: "❌ REJECT",
-          callback_data:
-            `reject_${chatId}`
-        }
-      ]
-    ]
-  }
-}
-    );
-
-    bot.sendMessage(
-      chatId,
-      "⏳ Waiting for admin approval..."
-    );
 
   }
 
@@ -767,7 +879,20 @@ ${order.qty}
       remaining.join('\n')
     );
 
-    // SAVE ORDERS
+    // SAVE DELIVERY LOG
+
+    deliveries.push({
+      user: userId,
+      orderId: order.orderId,
+      codes: selectedCodes
+    });
+
+    saveJSON(
+      'deliveries.json',
+      deliveries
+    );
+
+    // SAVE ORDER
 
     if (!userOrders[userId]) {
 
@@ -777,7 +902,8 @@ ${order.qty}
 
     userOrders[userId].push({
       qty: order.qty,
-      total: order.total
+      total: order.total,
+      orderId: order.orderId
     });
 
     saveJSON(
@@ -797,21 +923,30 @@ ${order.qty}
     );
 
     let text =
-`✅ Payment Approved
+`<b>✅ Payment Approved</b>
 
-🎟 Your Coupons:
+🆔 Order ID:
+#${order.orderId}
+
+<b>🎟 Your Coupons:</b>
 
 `;
 
     selectedCodes.forEach(code => {
 
-      text += `${code}\n`;
+      text += `<code>${code}</code>\n`;
 
     });
 
+    text +=
+`\n⚠️ Tap & Hold Coupon To Copy`;
+
     bot.sendMessage(
       userId,
-      text
+      text,
+{
+  parse_mode: "HTML"
+}
     );
 
     // DELETE ADMIN MESSAGE
