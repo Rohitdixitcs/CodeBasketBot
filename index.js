@@ -34,8 +34,18 @@ const DISCUSSION_GROUP = "@codebasket";
 // =======================
 
 const pendingOrders = {};
-
 let broadcastMode = false;
+
+let addStockMode = false;
+
+let findUserMode = false;
+
+let findOrderMode = false;
+
+let bannedUsers = loadJSON(
+  'banned.json',
+  []
+);
 
 let orderCounter = 1000;
 
@@ -92,14 +102,13 @@ let stats =
 // =======================
 // PRODUCT
 // =======================
-
 const product = {
 
   name: "🛒 BigBasket ₹100 OFF",
 
   file: "bigbasket.txt",
 
-  price: 12.5,
+  price: 13,
 
   details:
 `<b><u>🛒 BigBasket Offer</u></b>
@@ -189,6 +198,16 @@ async function checkJoin(chatId) {
 bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
 
   const chatId = String(msg.chat.id);
+  if (
+  bannedUsers.includes(chatId)
+) {
+
+  return bot.sendMessage(
+    chatId,
+    "🚫 You Are Banned"
+  );
+
+}
 
   const referrerId = match[1];
 
@@ -249,6 +268,7 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
   }
 
   // =======================
+   // =======================
   // REFERRAL SYSTEM
   // =======================
 
@@ -316,7 +336,6 @@ https://t.me/codebasketbot?start=${chatId}`,
   );
 
 });
-
 // =======================
 // ADMIN PANEL
 // =======================
@@ -357,14 +376,26 @@ Object.keys(referrals).length}`,
 {
   parse_mode: "HTML",
   reply_markup: {
-    keyboard: [
-      ["📊 Stats", "📦 Orders"],
-      ["🎟 Stock", "👥 Users"],
-      ["📢 Broadcast", "🧹 Clear Pending"],
-      ["🛒 Buy Coupon"]
-    ],
-    resize_keyboard: true
-  }
+  keyboard: [
+
+    ["📊 Stats", "💰 Revenue"],
+
+    ["📦 Orders", "🛒 Recent Sales"],
+
+    ["👥 Users", "🏆 Top Referrals"],
+
+    ["🎟 Stock", "➕ Add Stock"],
+
+    ["📢 Broadcast", "💾 Backup"],
+
+    ["🧹 Clear Pending"],
+
+    ["🛒 Buy Coupon"]
+
+  ],
+  resize_keyboard: true
+}   
+
 }
   );
 
@@ -382,26 +413,6 @@ bot.on('message', async (msg) => {
   if (!msg.text) return;
 
   if (msg.text.startsWith('/start')) return;
-
-  // =======================
-  // LOW STOCK WARNING
-  // =======================
-
-  if (
-    getStock(product.file) <= 10
-  ) {
-
-    bot.sendMessage(
-      ADMIN_ID,
-`⚠️ LOW STOCK WARNING
-
-Only ${
-getStock(product.file)
-} coupons left.`
-    ).catch(() => {});
-
-  }
-
   // =======================
   // ADMIN BUTTONS
   // =======================
@@ -550,50 +561,271 @@ ${msg.text}`,
   }
 
   // =======================
-  // USER BUTTONS
   // =======================
+// ADD STOCK SYSTEM
+// =======================
 
-  if (msg.text === "📞 Support") {
+if (msg.text === "➕ Add Stock") {
+
+  if (chatId !== ADMIN_ID) return;
+
+  addStockMode = true;
+
+  return bot.sendMessage(
+    chatId,
+`📦 Send Coupon Codes
+
+1 code per line`
+  );
+
+}
+
+
+
+if (
+  addStockMode &&
+  chatId === ADMIN_ID
+) {
+
+  addStockMode = false;
+
+  const newCodes =
+    msg.text
+    .split('\n')
+    .map(code => code.trim())
+    .filter(code => code);
+
+  if (newCodes.length === 0) {
 
     return bot.sendMessage(
       chatId,
-      "📞 Support: @Coderboyxx"
+      "❌ No Valid Codes Found"
     );
 
   }
 
-  if (msg.text === "👤 Owner") {
+  fs.appendFileSync(
+    product.file,
+    '\n' + newCodes.join('\n')
+  );
+
+  return bot.sendMessage(
+    chatId,
+`✅ ${newCodes.length} Coupons Added
+
+🎟 Current Stock:
+${getStock(product.file)}`
+  );
+
+}
+// =======================
+// REVENUE
+// =======================
+
+if (msg.text === "💰 Revenue") {
+
+  if (chatId !== ADMIN_ID) return;
+
+  return bot.sendMessage(
+    chatId,
+`💰 Total Revenue
+
+₹${stats.totalRevenue}`,
+{
+  parse_mode: "HTML"
+}
+  );
+
+}
+
+
+
+// =======================
+// RECENT SALES
+// =======================
+
+if (msg.text === "🛒 Recent Sales") {
+
+  if (chatId !== ADMIN_ID) return;
+
+  if (deliveries.length === 0) {
 
     return bot.sendMessage(
       chatId,
-      "👤 Owner: @Coderboyxx"
+      "❌ No Sales Yet"
     );
 
   }
 
-  if (msg.text === "📊 Stock") {
+  let text =
+"<b>🛒 Recent Sales</b>\n\n";
 
-    return bot.sendMessage(
-      chatId,
+  deliveries
+  .slice(-10)
+  .reverse()
+  .forEach(sale => {
+
+    text +=
+`🆔 #${sale.orderId}
+
+👤 ${sale.user}
+
+💰 ₹${sale.amount || 0}
+
+📅 ${sale.time || "N/A"}
+
+\n`;
+
+  });
+
+  return bot.sendMessage(
+    chatId,
+    text,
+{
+  parse_mode: "HTML"
+}
+  );
+
+}
+
+
+
+// =======================
+// TOP REFERRALS
+// =======================
+
+if (msg.text === "🏆 Top Referrals") {
+
+  if (chatId !== ADMIN_ID) return;
+
+  let ranking = [];
+
+  for (const user in referrals) {
+
+    ranking.push({
+      user,
+      total:
+      referrals[user].length
+    });
+
+  }
+
+  ranking.sort(
+    (a, b) =>
+    b.total - a.total
+  );
+
+  let text =
+"<b>🏆 Top Referrals</b>\n\n";
+
+  ranking
+  .slice(0, 10)
+  .forEach((r, i) => {
+
+    text +=
+`${i + 1}. ${r.user}
+- ${r.total} referrals\n`;
+
+  });
+
+  return bot.sendMessage(
+    chatId,
+    text,
+{
+  parse_mode: "HTML"
+}
+  );
+
+}
+
+
+
+// =======================
+// BACKUP
+// =======================
+
+if (msg.text === "💾 Backup") {
+
+  if (chatId !== ADMIN_ID) return;
+
+  await bot.sendDocument(
+    chatId,
+    './orders.json'
+  );
+
+  await bot.sendDocument(
+    chatId,
+    './deliveries.json'
+  );
+
+  await bot.sendDocument(
+    chatId,
+    './referrals.json'
+  );
+
+  await bot.sendDocument(
+    chatId,
+    './users.json'
+  );
+
+  return;
+
+}
+// =======================
+// ADD STOCK
+// =======================
+
+// =======================
+// USER BUTTONS
+// =======================
+
+if (msg.text === "📞 Support") {
+
+  return bot.sendMessage(
+    chatId,
+    "📞 Support: @Coderboyxx"
+  );
+
+}
+
+
+
+if (msg.text === "👤 Owner") {
+
+  return bot.sendMessage(
+    chatId,
+    "👤 Owner: @Coderboyxx"
+  );
+
+}
+
+
+
+if (msg.text === "📊 Stock") {
+
+  return bot.sendMessage(
+    chatId,
 `<b>📊 Available Coupons:</b>
 
 ${getStock(product.file)}`,
 {
   parse_mode: "HTML"
 }
-    );
+  );
 
-  }
+}
 
-  if (msg.text === "👥 Referrals") {
 
-    const count =
-      referrals[chatId]
-        ? referrals[chatId].length
-        : 0;
 
-    return bot.sendMessage(
-      chatId,
+if (msg.text === "👥 Referrals") {
+
+  const count =
+    referrals[chatId]
+      ? referrals[chatId].length
+      : 0;
+
+  return bot.sendMessage(
+    chatId,
 `<b>👥 Referrals:</b>
 
 ${count}/5
@@ -606,33 +838,35 @@ https://t.me/codebasketbot?start=${chatId}`,
 {
   parse_mode: "HTML"
 }
+  );
+
+}
+
+
+
+if (msg.text === "📦 My Orders") {
+
+  const orders =
+    userOrders[chatId];
+
+  if (
+    !orders ||
+    orders.length === 0
+  ) {
+
+    return bot.sendMessage(
+      chatId,
+      "❌ No Previous Orders Found"
     );
 
   }
 
-  if (msg.text === "📦 My Orders") {
+  let text =
+"<b>📦 Your Orders:</b>\n\n";
 
-    const orders =
-      userOrders[chatId];
+  orders.forEach((order, index) => {
 
-    if (
-      !orders ||
-      orders.length === 0
-    ) {
-
-      return bot.sendMessage(
-        chatId,
-        "❌ No Previous Orders Found"
-      );
-
-    }
-
-    let text =
-      "<b>📦 Your Orders:</b>\n\n";
-
-    orders.forEach((order, index) => {
-
-      text +=
+    text +=
 `<b>#${index + 1}</b>
 
 📦 Qty: ${order.qty}
@@ -643,18 +877,17 @@ https://t.me/codebasketbot?start=${chatId}`,
 
 `;
 
-    });
+  });
 
-    return bot.sendMessage(
-      chatId,
-      text,
+  return bot.sendMessage(
+    chatId,
+    text,
 {
   parse_mode: "HTML"
 }
-    );
+  );
 
-  }
-
+}
   // =======================
   // BUY COUPON
   // =======================
@@ -880,12 +1113,19 @@ bot.on('callback_query', async (query) => {
     );
 
     // SAVE DELIVERY LOG
-
     deliveries.push({
-      user: userId,
-      orderId: order.orderId,
-      codes: selectedCodes
-    });
+
+  user: userId,
+
+  orderId: order.orderId,
+
+  amount: order.total,
+
+  time: new Date().toLocaleString(),
+
+  codes: selectedCodes
+
+});
 
     saveJSON(
       'deliveries.json',
@@ -990,7 +1230,3 @@ bot.on('callback_query', async (query) => {
   }
 
 });
-
-console.log(
-  "✅ CodeBasketBot Running..."
-);
