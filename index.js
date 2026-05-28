@@ -99,7 +99,7 @@ const product = {
 
   file: "bigbasket.txt",
 
-  price: 7.5,
+  price: 12.5,
 
   details:
 `<b><u>🛒 BigBasket Offer</u></b>
